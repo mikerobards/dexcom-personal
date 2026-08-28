@@ -68,9 +68,15 @@ def _ssl_context() -> ssl.SSLContext:
 # ---------------------------------------------------------------------------
 
 def fetch_egvs(env: str, day: date) -> list[dict]:
-    """Fetch all EGV records for one calendar day (00:00:00-23:59:59)."""
-    start = datetime.combine(day, datetime.min.time())          # 00:00:00
-    end = start + timedelta(hours=23, minutes=59, seconds=59)   # 23:59:59
+    """Fetch all EGV records for one local calendar day (00:00:00-23:59:59).
+
+    The API interprets startDate/endDate as UTC (systemTime), but a "day"
+    for the wearer is defined by displayTime (their local clock). Query a
+    padded window, then keep only readings whose displayTime falls on the
+    requested date.
+    """
+    start = datetime.combine(day, datetime.min.time()) - timedelta(days=1)
+    end = start + timedelta(days=3)
 
     query = urllib.parse.urlencode({
         "startDate": start.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -99,7 +105,8 @@ def fetch_egvs(env: str, day: date) -> list[dict]:
     except urllib.error.URLError as err:
         sys.exit(f"Error: could not reach Dexcom API: {err.reason}")
 
-    return payload.get("records", [])
+    records = payload.get("records", [])
+    return [r for r in records if str(r.get("displayTime", "")).startswith(day.isoformat())]
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +118,8 @@ def write_csv(records: list[dict], out_path: str) -> None:
     with open(out_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["displayTime", "value_mg_dl"])
-        for record in records:
+        # API returns newest-first; write chronologically for analysis.
+        for record in sorted(records, key=lambda r: r.get("systemTime", "")):
             writer.writerow([record.get("displayTime"), record.get("value")])
 
 
