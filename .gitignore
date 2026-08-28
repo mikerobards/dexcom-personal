@@ -1,0 +1,5 @@
+.env
+.dexcom_tokens.json
+.venv/
+*.csv
+__pycache__/
