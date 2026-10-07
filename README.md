@@ -34,9 +34,35 @@ Options:
 
 ## From a Dexcom Clarity export
 
-If the API isn't returning your data, export it from the Clarity web
-app instead (Export → choose a date range → CSV) and let the script
-split it into the same daily files:
+If the API isn't returning your data (for example with a Stelo sensor),
+export it from the Clarity web app and let the script split it into the
+same daily files.
+
+### Workflow after wearing your CGM
+
+1. **Export the CSV from Clarity.** In the Clarity web app, use the
+   **Export** button, choose the date range you wore the sensor, and
+   download the `.csv` file. Use the CSV export, not the PDF report; the
+   PDF only has charts, so the script can't read it.
+2. **Put the CSV in this folder.** All `.csv` files are gitignored, so
+   neither the export (which includes your name and date of birth) nor
+   the daily files will be committed.
+3. **Run the script.** Adding the file doesn't do anything on its own:
+
+   ```bash
+   python3 dexcom_daily_report.py --from-clarity <export-file>.csv
+   ```
+
+   This writes one `egvs_<date>.csv` per day into this folder.
+
+Tips:
+
+- Export after the last day you want, so that day is complete. Days with
+  incomplete data are flagged as `(partial day)` in the output.
+- Overlapping exports are fine: days that appear again are rewritten
+  with the same readings.
+
+### Options
 
 ```bash
 # One egvs_<date>.csv per day in the export
