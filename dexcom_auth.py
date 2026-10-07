@@ -15,6 +15,8 @@ Credentials are read from environment variables or a .env file in this
 directory: DEXCOM_CLIENT_ID, DEXCOM_CLIENT_SECRET, DEXCOM_REDIRECT_URI.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import os

@@ -14,6 +14,8 @@ Usage:
     python3 dexcom_daily_report.py --date 2026-08-27 --env us --out report.csv
 """
 
+from __future__ import annotations
+
 import argparse
 import csv
 import json
@@ -48,6 +50,7 @@ def get_token() -> str:
     return os.environ.get("DEXCOM_ACCESS_TOKEN", "PLACEHOLDER_ACCESS_TOKEN")
 
 EGVS_PATH = "/v3/users/self/egvs"
+DATA_RANGE_PATH = "/v3/users/self/dataRange"
 
 
 def _ssl_context() -> ssl.SSLContext:
@@ -78,11 +81,23 @@ def fetch_egvs(env: str, day: date) -> list[dict]:
     start = datetime.combine(day, datetime.min.time()) - timedelta(days=1)
     end = start + timedelta(days=3)
 
-    query = urllib.parse.urlencode({
+    payload = api_get(env, EGVS_PATH, {
         "startDate": start.strftime("%Y-%m-%dT%H:%M:%S"),
         "endDate": end.strftime("%Y-%m-%dT%H:%M:%S"),
     })
-    url = f"{BASE_URLS[env]}{EGVS_PATH}?{query}"
+    records = payload.get("records", [])
+    matched = [r for r in records if str(r.get("displayTime", "")).startswith(day.isoformat())]
+
+    if not matched:
+        explain_empty(env, day, start, end, records)
+    return matched
+
+
+def api_get(env: str, path: str, params: dict | None = None) -> dict:
+    """GET a Dexcom API path and return the decoded JSON body."""
+    url = f"{BASE_URLS[env]}{path}"
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
 
     request = urllib.request.Request(url, headers={
         "Authorization": f"Bearer {get_token()}",
@@ -104,9 +119,36 @@ def fetch_egvs(env: str, day: date) -> list[dict]:
         sys.exit(f"Error: Dexcom API returned HTTP {err.code}.\nResponse: {body}")
     except urllib.error.URLError as err:
         sys.exit(f"Error: could not reach Dexcom API: {err.reason}")
+    return payload
 
-    records = payload.get("records", [])
-    return [r for r in records if str(r.get("displayTime", "")).startswith(day.isoformat())]
+
+def explain_empty(env: str, day: date, start: datetime, end: datetime,
+                  records: list[dict]) -> None:
+    """Print why a day came back empty: what the API returned and what it holds."""
+    print(f"Diagnostics ({env}, {BASE_URLS[env]}):", file=sys.stderr)
+    try:
+        import dexcom_auth
+        token_env = json.loads(dexcom_auth.TOKENS_FILE.read_text()).get("env")
+        print(f"  Saved login is for env: {token_env}", file=sys.stderr)
+    except Exception:
+        print("  No saved login found (using DEXCOM_ACCESS_TOKEN)", file=sys.stderr)
+    print(f"  Queried {start:%Y-%m-%dT%H:%M:%S} to {end:%Y-%m-%dT%H:%M:%S} (UTC): "
+          f"{len(records)} records returned", file=sys.stderr)
+    if records:
+        times = sorted(str(r.get("displayTime")) for r in records)
+        print(f"  Their displayTime spans {times[0]} to {times[-1]}; "
+              f"none start with {day.isoformat()}", file=sys.stderr)
+
+    payload = api_get(env, DATA_RANGE_PATH)
+    egvs = payload.get("egvs")
+    if egvs:
+        first = (egvs.get("start") or {}).get("displayTime")
+        last = (egvs.get("end") or {}).get("displayTime")
+        print(f"  Dexcom holds EGVs for this account from {first} to {last}",
+              file=sys.stderr)
+    else:
+        print("  Dexcom reports NO EGV data for this account at all "
+              f"(dataRange response: {json.dumps(payload)})", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
