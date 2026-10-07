@@ -146,10 +146,34 @@ def explain_empty(env: str, day: date, start: datetime, end: datetime,
         last = (egvs.get("end") or {}).get("displayTime")
         print(f"  Dexcom holds EGVs for this account from {first} to {last}",
               file=sys.stderr)
+        print_daily_counts(env, "around the requested day",
+                           datetime.combine(day, datetime.min.time()) - timedelta(days=14))
+        last_system = (egvs.get("end") or {}).get("systemTime") or last
+        if last_system:
+            latest = datetime.fromisoformat(str(last_system)[:19])
+            print_daily_counts(env, "the last week of data Dexcom reports",
+                               latest - timedelta(days=7), days=8)
     else:
         print("  Dexcom reports NO EGV data for this account at all "
               f"(dataRange response: {json.dumps(payload)})", file=sys.stderr)
 
+
+
+def print_daily_counts(env: str, label: str, start: datetime, days: int = 29) -> None:
+    """Print EGV readings per local day for a window (stays under the API's range limit)."""
+    end = start + timedelta(days=days)
+    payload = api_get(env, EGVS_PATH, {
+        "startDate": start.strftime("%Y-%m-%dT%H:%M:%S"),
+        "endDate": end.strftime("%Y-%m-%dT%H:%M:%S"),
+    })
+    counts: dict[str, int] = {}
+    for record in payload.get("records", []):
+        key = str(record.get("displayTime", ""))[:10]
+        counts[key] = counts.get(key, 0) + 1
+    print(f"  Readings per day {label} ({start:%Y-%m-%d} to {end:%Y-%m-%d} UTC): "
+          f"{sum(counts.values())} total", file=sys.stderr)
+    for key in sorted(counts):
+        print(f"    {key}: {counts[key]}", file=sys.stderr)
 
 # ---------------------------------------------------------------------------
 # CSV export
