@@ -12,6 +12,10 @@ Usage:
     python3 dexcom_daily_report.py                    # yesterday, sandbox
     python3 dexcom_daily_report.py --date 2026-08-27
     python3 dexcom_daily_report.py --date 2026-08-27 --env us --out report.csv
+
+    # From a Dexcom Clarity CSV export instead of the API
+    python3 dexcom_daily_report.py --from-clarity clarity_export.csv
+    python3 dexcom_daily_report.py --from-clarity clarity_export.csv --date 2026-08-26
 """
 
 from __future__ import annotations
@@ -197,8 +201,81 @@ def write_csv(records: list[dict], out_path: str) -> None:
         writer = csv.writer(f)
         writer.writerow(["displayTime", "value_mg_dl"])
         # API returns newest-first; write chronologically for analysis.
-        for record in sorted(records, key=lambda r: r.get("systemTime", "")):
+        for record in sorted(records, key=lambda r: r.get("systemTime") or r.get("displayTime", "")):
             writer.writerow([record.get("displayTime"), record.get("value")])
+
+
+# ---------------------------------------------------------------------------
+# Clarity CSV import
+# ---------------------------------------------------------------------------
+
+MMOL_TO_MG_DL = 18.0182
+
+
+def _find_column(header: list[str], prefix: str) -> int | None:
+    for i, name in enumerate(header):
+        if name.strip().lower().startswith(prefix.lower()):
+            return i
+    return None
+
+
+def read_clarity_csv(path: str) -> dict[date, list[dict]]:
+    """Read EGV rows from a Dexcom Clarity export, grouped by local day.
+
+    Clarity exports start with patient/device/alert rows, then one row per
+    event. Columns are matched by name ("Timestamp ...", "Event Type",
+    "Glucose Value (mg/dL)" or "(mmol/L)"), so column order doesn't matter.
+    Timestamps are already the wearer's local time, matching displayTime.
+    "Low"/"High" readings (outside the sensor's range) are kept as text.
+    """
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        rows = list(csv.reader(f))
+    if not rows:
+        sys.exit(f"Error: {path} is empty")
+
+    header = rows[0]
+    ts_col = _find_column(header, "Timestamp")
+    type_col = _find_column(header, "Event Type")
+    value_col = _find_column(header, "Glucose Value")
+    if None in (ts_col, type_col, value_col):
+        sys.exit(f"Error: {path} doesn't look like a Clarity export "
+                 f"(expected Timestamp, Event Type and Glucose Value columns).\n"
+                 f"Header found: {header}")
+    mmol = "mmol" in header[value_col].lower()
+    if mmol:
+        print("Note: export is in mmol/L; converting to mg/dL (rounded).",
+              file=sys.stderr)
+
+    days: dict[date, list[dict]] = {}
+    for row in rows[1:]:
+        if len(row) <= max(ts_col, type_col, value_col):
+            continue
+        if row[type_col].strip().upper() != "EGV" or not row[ts_col].strip():
+            continue
+        timestamp = row[ts_col].strip()
+        value: object = row[value_col].strip()
+        try:
+            number = float(value)
+            value = round(number * MMOL_TO_MG_DL) if mmol else int(number)
+        except ValueError:
+            pass  # "Low" / "High"
+        day = date.fromisoformat(timestamp[:10])
+        days.setdefault(day, []).append({"displayTime": timestamp, "value": value})
+    return days
+
+
+def export_clarity(path: str, only_day: date | None, out_path: str | None) -> None:
+    days = read_clarity_csv(path)
+    if only_day:
+        days = {only_day: days.get(only_day, [])}
+    if not days:
+        sys.exit(f"Error: no EGV readings found in {path}")
+
+    for day in sorted(days):
+        target = out_path or f"egvs_{day.isoformat()}.csv"
+        write_csv(days[day], target)
+        note = "" if len(days[day]) >= 250 else "  (partial day)"
+        print(f"Wrote {len(days[day])} EGV readings for {day} to {target}{note}")
 
 
 # ---------------------------------------------------------------------------
@@ -212,8 +289,9 @@ def main() -> None:
     parser.add_argument(
         "--date",
         type=date.fromisoformat,
-        default=date.today() - timedelta(days=1),
-        help="Day to report on, YYYY-MM-DD (default: yesterday)",
+        default=None,
+        help="Day to report on, YYYY-MM-DD (default: yesterday; "
+             "with --from-clarity, every day in the file)",
     )
     parser.add_argument(
         "--env",
@@ -226,8 +304,21 @@ def main() -> None:
         default=None,
         help="Output CSV path (default: egvs_<date>.csv)",
     )
+    parser.add_argument(
+        "--from-clarity",
+        metavar="CSV",
+        default=None,
+        help="Read a Dexcom Clarity CSV export instead of calling the API",
+    )
     args = parser.parse_args()
 
+    if args.from_clarity:
+        if args.out and not args.date:
+            parser.error("--out with --from-clarity needs --date (one file per day)")
+        export_clarity(args.from_clarity, args.date, args.out)
+        return
+
+    args.date = args.date or date.today() - timedelta(days=1)
     out_path = args.out or f"egvs_{args.date.isoformat()}.csv"
 
     records = fetch_egvs(args.env, args.date)

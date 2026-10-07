@@ -30,6 +30,27 @@ Options:
 | `--date` | yesterday | Day to report on, `YYYY-MM-DD` |
 | `--env` | `sandbox` | `sandbox`, `us`, `eu`, or `jp` |
 | `--out` | `egvs_<date>.csv` | Output CSV path |
+| `--from-clarity` | — | Read a Dexcom Clarity CSV export instead of calling the API |
+
+## From a Dexcom Clarity export
+
+If the API isn't returning your data, export it from the Clarity web
+app instead (Export → choose a date range → CSV) and let the script
+split it into the same daily files:
+
+```bash
+# One egvs_<date>.csv per day in the export
+python3 dexcom_daily_report.py --from-clarity clarity_export.csv
+
+# Just one day
+python3 dexcom_daily_report.py --from-clarity clarity_export.csv \
+    --date 2026-08-26 --out report.csv
+```
+
+Only EGV rows are used (alerts, events and patient info are skipped).
+Days at the edges of the export range are flagged as partial. mmol/L
+exports are converted to mg/dL, and out-of-range readings stay as
+`Low` / `High`.
 
 ## Auth
 
