@@ -51,6 +51,7 @@ def get_token() -> str:
 
 EGVS_PATH = "/v3/users/self/egvs"
 DATA_RANGE_PATH = "/v3/users/self/dataRange"
+DEVICES_PATH = "/v3/users/self/devices"
 
 
 def _ssl_context() -> ssl.SSLContext:
@@ -138,6 +139,13 @@ def explain_empty(env: str, day: date, start: datetime, end: datetime,
         times = sorted(str(r.get("displayTime")) for r in records)
         print(f"  Their displayTime spans {times[0]} to {times[-1]}; "
               f"none start with {day.isoformat()}", file=sys.stderr)
+
+    devices = api_get(env, DEVICES_PATH).get("records", [])
+    print(f"  Devices on this account: {len(devices)}", file=sys.stderr)
+    for device in devices:
+        print(f"    {device.get('transmitterGeneration')} via "
+              f"{device.get('displayApp') or device.get('displayDevice')}, "
+              f"last upload {device.get('lastUploadDate')}", file=sys.stderr)
 
     payload = api_get(env, DATA_RANGE_PATH)
     egvs = payload.get("egvs")
