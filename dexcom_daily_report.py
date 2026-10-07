@@ -91,6 +91,7 @@ def fetch_egvs(env: str, day: date) -> list[dict]:
 
     if not matched:
         explain_empty(env, day, start, end, records)
+        print(f"  Raw EGV response: {json.dumps(payload)[:500]}", file=sys.stderr)
     return matched
 
 
@@ -140,7 +141,9 @@ def explain_empty(env: str, day: date, start: datetime, end: datetime,
         print(f"  Their displayTime spans {times[0]} to {times[-1]}; "
               f"none start with {day.isoformat()}", file=sys.stderr)
 
-    devices = api_get(env, DEVICES_PATH).get("records", [])
+    devices_payload = api_get(env, DEVICES_PATH)
+    print(f"  Raw devices response: {json.dumps(devices_payload)[:500]}", file=sys.stderr)
+    devices = devices_payload.get("records", [])
     print(f"  Devices on this account: {len(devices)}", file=sys.stderr)
     for device in devices:
         print(f"    {device.get('transmitterGeneration')} via "
@@ -148,6 +151,7 @@ def explain_empty(env: str, day: date, start: datetime, end: datetime,
               f"last upload {device.get('lastUploadDate')}", file=sys.stderr)
 
     payload = api_get(env, DATA_RANGE_PATH)
+    print(f"  Raw dataRange response: {json.dumps(payload)[:500]}", file=sys.stderr)
     egvs = payload.get("egvs")
     if egvs:
         first = (egvs.get("start") or {}).get("displayTime")
